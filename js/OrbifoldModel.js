@@ -10,7 +10,7 @@
 //   faces   [{ wall, bounds[], tr[], parity, kind, pair, color, label, tokens[], params, ends }]
 //   inner   [{ wall, A, B, label, tokens[], params }]  interior cuts (tubes, slices)
 //   points  [{ pos, kind: 'cone'|'corner', n, tokens[], word }]
-//   comma   { c, size }               where the motif sits in the fundamental domain
+//   comma   { c, size, A | e1,e2 }    where the motif sits in the fundamental domain (see Motif.js)
 //   handles [{ id, pos, label }]      Euclidean lattice handles (world coordinates)
 
 import { WallPaperGroup_General } from '../vendor/symmhub/lib/orbilib/WallPaperGroup_General.js';
@@ -34,6 +34,7 @@ const EUC_BUILDERS = {
   'O': v => iGroup_O([1, 0], [v.lattice_x, v.lattice_y]),
 };
 import { ParamStore, makeHeadlessFolder } from './ParamStore.js';
+import { withDefaultFrame, settle } from './Motif.js';
 import * as Sig from './Signature.js';
 import {
   SPHERE, PLANE, wallFromSplane, wallFromSplane3, dist2, apply2, applyInv2, reflect2,
@@ -84,6 +85,7 @@ export class OrbifoldModel {
     this.text = Sig.stringify(toks);
     this.bad = Sig.isBad(toks);
     this.error = '';
+    this.motif = opts.motif || null;      // user-placed motif; null = automatic
     if (opts.params) Object.assign(this.values, opts.params);
     if (this.bad) { this.emit('change', { kind: 'signature', bad: true }); return true; }
     try {
@@ -105,6 +107,18 @@ export class OrbifoldModel {
     if (any) this._rebuildGeometry({ quick: !!opts.quick });
     return any;
   }
+
+  // move the motif (m in Motif.js form); it is folded back into the domain
+  setMotif(m, { silent = false } = {}) {
+    if (!this.geo || this.bad) return null;
+    const s = settle(this.geo, m);
+    if (!s) return null;
+    this.motif = s.m;
+    this.geo.comma = s.m;
+    if (!silent) this.emit('change', { kind: 'motif' });
+    return s;
+  }
+  resetMotif() { this.motif = null; if (this.geo) { this.geo.comma = withDefaultFrame(this.geo, placeComma(this.geo)); this.emit('change', { kind: 'motif' }); } }
 
   // full re-detection of cone/corner points (after a drag ends)
   refresh() { if (!this.bad && this.geo) { this._rebuildGeometry({ quick: false }); this.emit('change', { kind: 'refresh' }); } }
@@ -172,7 +186,12 @@ export class OrbifoldModel {
       geo.points = findSpecialPoints(geo);
     }
     this._assignTokens(geo);
-    geo.comma = placeComma(geo);
+    geo.comma = null;
+    if (this.motif && this.motif.c.length === (geo.mode === 'sph' ? 3 : 2)) {
+      const s = settle(geo, this.motif);
+      if (s) { geo.comma = s.m; this.motif = s.m; }
+    }
+    if (!geo.comma) { this.motif = null; geo.comma = withDefaultFrame(geo, placeComma(geo)); }
     geo.handles = this.mode === 'euc' ? this._latticeHandles(geo) : [];
     geo.version = (prev?.version || 0) + 1;
     this.geo = geo;

@@ -33,6 +33,8 @@ uniform vec4 uV0, uV1;     // screen -> world Möbius  (a, b | c, d)
 uniform mat3 uR;           // sphere: view -> world
 uniform vec3 uCommaC, uCommaE1, uCommaE2;
 uniform float uCommaSize;
+uniform mat2 uCommaA;        // motif frame (2D): uv = A (p - c) / size
+uniform int uCommaHL;        // 0 none, 1 hovered, 2 selected
 uniform float uDpr;
 uniform float uDim;
 uniform int uHomeTint;
@@ -127,18 +129,44 @@ void main(){
   vec3 col = parity == 0 ? fillF : fillB;
   if (uHomeTint == 1 && steps == 0) col = mix(col, vec3(1.), 0.35);
 
-  // ── comma ──
-  vec2 uv;
-  if (sph) { vec3 dlt = P - uCommaC; uv = vec2(dot(dlt, uCommaE1), dot(dlt, uCommaE2)) / uCommaSize; if (dot(P, uCommaC) < 0.) uv = vec2(9.); }
-  else uv = (p - uCommaC.xy) / uCommaSize;
-  vec2 tuv = vec2(uv.x, -uv.y) * 0.5 + 0.5;
-  if (all(greaterThan(tuv, vec2(0.))) && all(lessThan(tuv, vec2(1.)))) {
-    // explicit LOD: derivatives jump across tile seams, so texture() would blur there
-    float lod = log2(max(256. / max(2. * uCommaSize * scale * uDpr, 1e-3), 1.));
-    vec4 m = textureLod(uMotif, tuv, lod);
-    vec3 ci = parity == 0 ? inkF : inkB;
-    col = mix(col, mix(ci, ink, 0.25), m.g * 0.9);
-    col = mix(col, ci, m.r);
+  // ── comma ── (this tile's own, and those of tiles one or two steps away that poke in)
+  {
+    vec4 best = vec4(0.); int bpar = parity;
+    for (int pass = 0; pass < 1 + ${MAXF} + 144; pass++) {
+      int i = -1, j = -1;
+      if (pass > 0 && pass <= uNF) i = pass - 1;
+      else if (pass > ${MAXF}) { if (uNF > 12) break; int q = pass - ${MAXF} - 1; i = q / 12; j = q - 12 * (q / 12); if (i >= uNF) break; if (j >= uNF) continue; }
+      else if (pass > 0) continue;
+      vec2 pp = p; vec3 PP = P; int par = parity;
+      for (int s2 = 0; s2 < 2; s2++) {
+        int f = s2 == 0 ? i : j;
+        if (f < 0) continue;
+        int nt = int(T(11, f).z);
+        for (int t = 0; t < 6; t++) {
+          if (t >= nt) break;
+          vec4 sp = T(5 + t, f);
+          if (sph) PP = PP - 2. * dot(sp.xyz, PP) * sp.xyz;
+          else pp = refl2(sp, typeOf(f, 4 + t), pp).xy;
+        }
+        par ^= (nt & 1);
+      }
+      vec2 uv;
+      if (sph) { vec3 dlt = PP - uCommaC; uv = vec2(dot(dlt, uCommaE1), dot(dlt, uCommaE2)) / uCommaSize; if (dot(PP, uCommaC) < 0.) uv = vec2(9.); }
+      else uv = (uCommaA * (pp - uCommaC.xy)) / uCommaSize;
+      vec2 tuv = vec2(uv.x, -uv.y) * 0.5 + 0.5;
+      if (any(lessThanEqual(tuv, vec2(0.))) || any(greaterThanEqual(tuv, vec2(1.)))) continue;
+      // explicit LOD: derivatives jump across tile seams, so texture() would blur there
+      float lod = log2(max(256. / max(2. * uCommaSize * scale * uDpr, 1e-3), 1.));
+      vec4 m = textureLod(uMotif, tuv, lod);
+      if (max(m.r, m.g) > max(best.r, best.g)) { best = m; bpar = par; }
+      if (best.r > 0.99) break;
+    }
+    if (max(best.r, best.g) > 0.) {
+      vec3 ci = bpar == 0 ? inkF : inkB;
+      vec3 oc = uCommaHL > 0 ? vec3(1., 0.75, 0.1) : mix(ci, ink, 0.25);
+      col = mix(col, oc, best.g * (uCommaHL > 0 ? 1. : 0.9));
+      col = mix(col, uCommaHL == 2 ? mix(ci, vec3(1., 0.84, 0.23), 0.35) : ci, best.r);
+    }
   }
 
   // ── edges ── (thinner where tiles are tiny, e.g. near the rim of the disk)
@@ -256,7 +284,7 @@ export class PatternView {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     this.uni = {};
-    for (const n of ['uData', 'uMotif', 'uMode', 'uNF', 'uNI', 'uNP', 'uCenter', 'uS', 'uOff', 'uV0', 'uV1', 'uR', 'uCommaC', 'uCommaE1', 'uCommaE2', 'uCommaSize', 'uDpr', 'uDim', 'uHomeTint'])
+    for (const n of ['uData', 'uMotif', 'uMode', 'uNF', 'uNI', 'uNP', 'uCenter', 'uS', 'uOff', 'uV0', 'uV1', 'uR', 'uCommaC', 'uCommaE1', 'uCommaE2', 'uCommaSize', 'uCommaA', 'uCommaHL', 'uDpr', 'uDim', 'uHomeTint'])
       this.uni[n] = gl.getUniformLocation(prog, n);
     this.dataTex = gl.createTexture();
     this.motifTex = gl.createTexture();
@@ -476,12 +504,15 @@ export class PatternView {
     const cm = g && g.comma ? g.comma : { c: [0, 0], size: 0.1 };
     if (mode === 2) {
       const c = cm.c.length === 3 ? cm.c : [0, 0, 1];
-      const a = Math.abs(c[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-      const e1 = norm3(cross3(a, c)), e2 = cross3(c, e1);
+      let e1 = cm.e1, e2 = cm.e2;
+      if (!e1) { const a = Math.abs(c[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]; e1 = norm3(cross3(a, c)); e2 = cross3(c, e1); }
       gl.uniform3f(U.uCommaC, ...c); gl.uniform3f(U.uCommaE1, ...e1); gl.uniform3f(U.uCommaE2, ...e2);
     } else {
       gl.uniform3f(U.uCommaC, cm.c[0], cm.c[1], 0);
+      const A = cm.A || [1, 0, 0, 1];
+      gl.uniformMatrix2fv(U.uCommaA, false, new Float32Array([A[0], A[2], A[1], A[3]]));   // column-major
     }
+    gl.uniform1i(U.uCommaHL, this.motifState || 0);
     gl.uniform1f(U.uCommaSize, cm.size);
     gl.uniform1f(U.uDpr, this.dpr);
     gl.uniform1f(U.uDim, this.dim);

@@ -30,6 +30,13 @@ button { font: inherit; color: inherit; }
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
 .tabs button:hover:not([aria-selected="true"]) { border-color: var(--line); }
 
+.credits { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.badge { display: inline-block; padding: 8px 16px; border: 2px solid var(--ink); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 15px; line-height: 1.2; background: var(--card); }
+.badge:hover { background: var(--ink); color: var(--paper); }
+.badge-mt { font-size: 17px; font-weight: 650; background: var(--ink); color: var(--paper); }
+.badge-mt:hover { background: #2e7d71; border-color: #2e7d71; }
+@media (max-width: 760px) { .credits { margin-left: 0; width: 100%; } .badge { font-size: 14px; padding: 6px 12px; } .badge-mt { font-size: 15px; } }
+
 /* layout */
 .layout {
   display: grid; gap: 16px; padding: 16px;

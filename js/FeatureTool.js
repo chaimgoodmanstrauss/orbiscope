@@ -11,6 +11,8 @@
 
 import { dist2, dot3, hypLerp, hypDist, Mob, C } from './geom.js';
 import { unreduce } from './OrbifoldModel.js';
+import { motifHit, applyWord, carry } from './Motif.js';
+import { M3 } from './geom.js';
 
 const HIT_EDGE = 7, HIT_POINT = 10, HIT_HANDLE = 12;
 const LENGTH_DRAG_SPEED = 0.005, TWIST_DRAG_SPEED = 0.002;
@@ -57,6 +59,8 @@ export class FeatureTool {
       if (d < HIT_POINT && (!best || d < best.d)) best = { type: 'point', index: i, d, probe: pr, tokens: pt.tokens };
     });
     if (best) return best;
+    const mw = motifHit(g, g.comma, pr.p);
+    if (mw) return { type: 'motif', word: [...pr.word, ...mw], probe: pr, tokens: [] };
     g.faces.forEach((f, i) => {
       const d = Math.abs(sph ? dot3(f.wall, pr.p) : dist2(f.wall, pr.p)) * pr.scale;
       if (d >= HIT_EDGE) return;
@@ -90,15 +94,23 @@ export class FeatureTool {
     this.hoverHit = hit;
     this.view.hover = hit;
     this.highlight.set(this._highlightFor(hit));
+    this._motifState(hit && hit.type === 'motif');
     this._cursor(hit);
     this._tip(hit, x, y);
     this.view.drawOverlay();
   }
 
+  _motifState(hover) {
+    const v = this.selected ? 2 : hover || (this.drag && this.drag.kind === 'motif') ? 1 : 0;
+    if (v !== this.view.motifState) { this.view.motifState = v; this.view.requestRender(); }
+  }
+  select(on) { this.selected = !!on; this._motifState(this.hoverHit && this.hoverHit.type === 'motif'); }
+
   _cursor(hit) {
     const c = this.canvas;
     if (this.drag && this.drag.kind !== 'pan') { c.style.cursor = 'grabbing'; return; }
     if (!hit) { c.style.cursor = this.drag ? 'grabbing' : 'grab'; return; }
+    if (hit.type === 'motif') { c.style.cursor = this.drag ? 'grabbing' : 'grab'; return; }
     if (hit.type === 'handle' || ((hit.type === 'face' || hit.type === 'inner') && hit.params?.length)) c.style.cursor = 'move';
     else if (hit.type === 'point') c.style.cursor = 'pointer';
     else c.style.cursor = 'help';
@@ -115,6 +127,7 @@ export class FeatureTool {
       return parts.join(' · ');
     };
     if (hit.type === 'handle') return `${hit.handle.label} — drag to reshape`;
+    if (hit.type === 'motif') return this.selected ? 'the comma (selected) — drag to move every copy; Esc deselects' : 'the comma — click to select, drag to move every copy';
     if (hit.type === 'point') {
       const p = g.points[hit.index];
       return p.kind === 'cone' ? `gyration point ${p.n} — click +1, alt-click −1` : `corner ${p.n}: ${p.n} mirrors meet — click +1, alt-click −1`;
@@ -149,7 +162,10 @@ export class FeatureTool {
     if (e.button !== undefined && e.button !== 0) return;
     const hit = this.hitTest(x, y);
     const touch = e.pointerType !== 'mouse';
-    if (hit && hit.type === 'handle') {
+    if (hit && hit.type === 'motif') {
+      const g = this.model.geo;
+      this.drag = { kind: 'motif', word: hit.word, qPrev: applyWord(g, hit.word, hit.probe.w), x, y, moved: false };
+    } else if (hit && hit.type === 'handle') {
       const h = hit.handle;
       this.drag = { kind: 'handle', handle: h, start: { pos: [...h.pos], value: this.model.values.lattice_b } };
     } else if (hit && (hit.type === 'face' || hit.type === 'inner') && hit.params?.length && this.model.geo.mode === 'hyp') {
@@ -222,6 +238,10 @@ export class FeatureTool {
       if (!e.shiftKey && tn) vals[tn] = d.start[tn];
       this._applyParam(d, vals);
       this._tip(d.hit, x, y);
+    } else if (d.kind === 'motif') {
+      if (Math.hypot(x - d.x, y - d.y) > 2) d.moved = true;
+      this._moveMotif(d, x, y);
+      this._tip(null);
     } else if (d.kind === 'handle') {
       const w = this.view.screenToWorld(this.view.cssToScreen(x, y));
       if (w) this.model.dragHandle(d.handle, w, d.start);
@@ -240,6 +260,12 @@ export class FeatureTool {
     this.drag = null;
     if (!d) return;
     const [x, y] = this._xy(e);
+    if (d.kind === 'motif') {
+      this.select(true);
+      if (d.moved) this.onCommit();
+    } else if (d.kind === 'pan' && !d.moved && e.type === 'pointerup' && this.selected) {
+      this.select(false);
+    }
     if (d.kind === 'click' && e.type === 'pointerup') {
       const p = this.model.geo.points[d.hit.index];
       const tk = (p.tokens || []).find(i => ['cone', 'corner'].includes(this.model.tokens[i]?.kind));
@@ -250,6 +276,27 @@ export class FeatureTool {
     }
     if (e.pointerType === 'mouse') this._setHover(this.hitTest(x, y), x, y);
     else this._setHover(null);
+  }
+
+  // drag the comma: the pointer, carried into the grabbed copy's frame, moves the
+  // motif's centre by the same amount; it is folded back into the domain as it goes.
+  _moveMotif(d, x, y) {
+    const g = this.model.geo, m = g.comma;
+    const w = this.view.screenToWorld(this.view.cssToScreen(x, y));
+    if (!w || !m) return;
+    if (g.mode === 'hyp' && w[0] * w[0] + w[1] * w[1] > 0.999) return;
+    const q = applyWord(g, d.word, w);
+    let next;
+    if (g.mode === 'sph') {
+      const R = M3.fromTo(d.qPrev, q);
+      next = { ...m, c: M3.apply(R, m.c), e1: M3.apply(R, m.e1), e2: M3.apply(R, m.e2) };
+    } else {
+      next = { ...m, c: [m.c[0] + q[0] - d.qPrev[0], m.c[1] + q[1] - d.qPrev[1]] };
+    }
+    const s = this.model.setMotif(next);
+    if (!s) return;
+    if (s.word.length) { d.word = [...d.word, ...s.word]; d.qPrev = applyWord(g, s.word, q); }
+    else d.qPrev = q;
   }
 
   _startPinch() {
