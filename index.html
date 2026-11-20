@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbiscope</title>
+<meta name="description" content="Edit an orbifold signature and reshape its pattern by dragging its features.">
+<link rel="stylesheet" href="css/orbiscope.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%239ad5cc' stroke='%231a1a1f' stroke-width='2'/%3E%3Cpath d='M16 2 A14 14 0 0 1 16 30 A9 9 0 0 0 16 2Z' fill='%23f5e6c6'/%3E%3C/svg%3E">
+<script type="importmap">
+{ "imports": { "./vendor/symmhub/lib/invlib/modules.js": "./js/shims/invlib-modules.js" } }
+</script>
+</head>
+<body>
+<header class="top">
+  <h1>Orbiscope</h1>
+  <nav class="tabs" role="tablist" aria-label="panels">
+    <button role="tab" data-tab="pattern" aria-selected="true">Pattern</button>
+    <button role="tab" data-tab="surface" aria-selected="false">Surface</button>
+    <button role="tab" data-tab="examples" aria-selected="false">Examples</button>
+  </nav>
+</header>
+
+<div class="layout">
+  <section class="pane pane-pattern" aria-label="pattern">
+    <div class="canvas-wrap">
+      <canvas id="pattern" aria-label="the pattern: hover a feature to see it, drag edges or handles to reshape, drag empty space to move" tabindex="0"></canvas>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+      <div id="tip" class="tip" hidden></div>
+      <div class="pane-tools">
+        <button id="undo" class="mini" aria-label="undo" title="undo (Ctrl/Cmd-Z)">↶</button>
+        <button id="redo" class="mini" aria-label="redo" title="redo (Shift-Ctrl/Cmd-Z)">↷</button>
+        <button id="home" class="mini" aria-label="reset the view" title="reset the view (0)">⌂</button>
+      </div>
+    </div>
+    <p class="hint" id="hint"></p>
+  </section>
+
+  <aside class="side">
+    <div id="sig-editor" class="sig-editor"></div>
+    <p class="caption" id="caption"></p>
+
+    <div class="panel" data-tab-only="pattern">
+      <div class="legend">
+        <span class="lg"><span id="lg-front"></span> a turned copy</span>
+        <span class="lg"><span id="lg-back"></span> a mirror image</span>
+        <span class="lg"><i class="sw mirror"></i> mirror</span>
+        <span class="lg"><i class="sw glued"></i> same colour: glued</span>
+      </div>
+      <div id="params" class="params"></div>
+    </div>
+
+    <div class="panel" data-tab-only="surface" hidden>
+      <p class="note">The pattern folds up, tile onto tile, into this surface. Hover a part to find it in the pattern and in the signature.</p>
+    </div>
+
+    <div class="panel" data-tab-only="examples" hidden>
+      <div id="examples" class="examples"></div>
+    </div>
+
+    <details class="fold">
+      <summary>What the characters mean</summary>
+      <dl class="chars">
+        <dt>o</dt><dd>a <b>handle</b>: the pattern repeats by sliding, and folds up into a torus-like tube.</dd>
+        <dt>3</dt><dd>a <b>gyration point</b> written before any ∗: the pattern turns a third of the way round it, with no mirror through it.</dd>
+        <dt>∗</dt><dd>a <b>kaleidoscope</b>: a family of mirror lines. Folded up, each ∗ is a hole with a mirror rim.</dd>
+        <dt>∗2</dt><dd>a digit after ∗ is a <b>corner</b>, where that many mirrors cross.</dd>
+        <dt>x</dt><dd>a <b>crosscap</b>, or miracle: a glide or turn-flip that no mirror explains.</dd>
+      </dl>
+    </details>
+    <details class="fold">
+      <summary>The Magic Theorem</summary>
+      <p>Each character costs something: <b>o</b> costs $2; <b>∗</b> and <b>x</b> cost $1; a gyration point of order <i>n</i> costs (<i>n</i>−1)/<i>n</i>; a corner costs half that. Every pattern of the flat plane costs exactly <b>$2</b>. Under $2 the pattern lives on a sphere, and it has 2 ÷ (2 − price) symmetries; over $2 it lives in the hyperbolic plane. Four cheap signatures — <i>N</i>, <i>MN</i>, ∗<i>N</i>, ∗<i>MN</i> with <i>M</i> ≠ <i>N</i> — belong to no pattern at all.</p>
+    </details>
+    <details class="fold">
+      <summary>What you can drag</summary>
+      <p>Hover the pattern: edges, cones and corners light up, and so does their character in the signature. In the hyperbolic plane, edges with a length glow when hovered: <b>drag</b> to stretch, <b>shift-drag</b> to twist, or use the wheel. <b>Click</b> a cone or corner to raise its number (alt-click lowers it). Flat lattices have round handles. Drag empty space to move the pattern, wheel or pinch to zoom, <b>0</b> to reset.</p>
+    </details>
+  </aside>
+
+  <section class="pane pane-surface" aria-label="surface">
+    <h2 class="pane-title">The surface it folds into</h2>
+    <svg id="surface" role="img" aria-label="schematic of the orbifold's surface"></svg>
+    <div id="surface-info" class="surface-info"></div>
+  </section>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

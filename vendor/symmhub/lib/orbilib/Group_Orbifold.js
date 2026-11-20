@@ -1,0 +1,240 @@
+/**
+ * Group_Orbifold — GroupMaker adapter for WallPaperGroup_General.
+ *
+ * UI strategy:
+ *   ParamObj calls createUI(folder) with the real dat.gui folder.
+ *   We wire it into WallPaperGroup_General so its existing rebuildGui() /
+ *   updateTheGroup() creates the dynamic length-twist slider sub-folder.
+ *
+ * Serialization:
+ *   getParamsMap() / setParamsMap() delegate to WallPaperGroup_General,
+ *   which already handles orbifold name + all numeric params.
+ */
+
+import {
+    WallPaperGroup_General,
+    TWISTMAXVALUE, TWISTMINVALUE,
+    LENGTHMAXVALUE, LENGTHMINVALUE,
+} from './WallPaperGroup_General.js';
+
+import { OrbifoldUITool } from './OrbifoldUITool.js';
+
+import { Group } from './modules.js';
+
+const MYNAME = 'Group_Orbifold';
+const DEBUG  = false;
+
+// ── Minimal mock so constructor-time updateTheGroup() doesn't throw ────────
+
+function makeMockController() {
+    const c = { setValue: () => c, onChange: () => c, updateDisplay: () => c };
+    return c;
+}
+function makeMockFolder() {
+    const f = {
+        add:          () => makeMockController(),
+        addFolder:    () => makeMockFolder(),
+        removeFolder: () => {},
+        open:         () => {},
+        close:        () => {},
+        gpname:       makeMockController(),
+    };
+    return f;
+}
+
+// ── No-op symmetryUI stub ─────────────────────────────────────────────────
+
+const symmetryUIStub = {
+    init:        () => {},
+    setShift:    () => {},
+    render:      () => [],
+    getUniforms: (u) => u,
+    handleEvent: () => {},
+};
+
+// ── Adapter class ─────────────────────────────────────────────────────────
+
+export class Group_Orbifold {
+
+    constructor(opt = {}) {
+
+        this._wg = new WallPaperGroup_General({
+            symmetryUI:   symmetryUIStub,
+            patternMaker: null,
+        });
+
+        // Use mock until createUI() wires in the real folder.
+        this._wg.paramGui       = makeMockFolder();
+        this._wg.paramGuiFolder = null;
+        this._wg.guiParams      = { name: opt.orbifold || '*442' };
+
+        // interactive on-image editing (created on demand by createUITool)
+        this._uiConfig = { showDomain: true, showFill: true };
+        this._uiTool   = null;
+
+        this._compute();
+    }
+
+    /**
+     * Create the interactive on-image parameter editor (called by SymRenderer).
+     * opts: { navigator, canvas, repaint }
+     */
+    createUITool(opts = {}) {
+        this._uiTool = new OrbifoldUITool({
+            wg:        this._wg,
+            navigator: opts.navigator,
+            canvas:    opts.canvas,
+            repaint:   opts.repaint,
+            config:    this._uiConfig,
+            glEdgeRenderer: opts.glEdgeRenderer,
+        });
+        // let WallPaperGroup_General.groupParamsChanged() reach setShift()
+        this._wg.symmetryUIController = this._uiTool;
+        return this._uiTool;
+    }
+
+    // ── GroupMaker interface ──────────────────────────────────────────────
+
+    getClassName() { return MYNAME; }
+
+    /**
+     * Curvature of the current orbifold: < 0 hyperbolic (the Poincare unit
+     * disk), 0 Euclidean, > 0 spherical. Optional part of the GroupMaker
+     * interface — SymRenderer uses it to know when the picture is confined to
+     * the unit disk and drags have to stay inside it.
+     */
+    getCurvature() {
+        return (this._wg && typeof this._wg.curvature === 'number') ? this._wg.curvature : undefined;
+    }
+
+    setOptions(opt = {}) {
+        if (opt.onChanged) {
+            this._onChanged    = opt.onChanged;
+            this._wg.onChanged = opt.onChanged;
+        }
+    }
+
+    /**
+     * Called by ParamObj when the UI panel is built (also on replaceObj).
+     * Wires the real dat.gui folder into WallPaperGroup_General so that
+     * updateTheGroup() → rebuildGui() creates real length/twist sliders.
+     */
+    createUI(folder) {
+        this._wg.paramGui       = folder;
+        this._wg.paramGuiFolder = null;
+
+        // ── Remove any stale "Parameters for …" sub-folders left by a
+        //    previous Group_Orbifold instance (happens on replaceObj).
+        if (folder.__folders) {
+            Object.keys(folder.__folders)
+                .filter(k => k.startsWith('Parameters for'))
+                .forEach(k => {
+                    try { folder.removeFolder(folder.__folders[k]); } catch (_) {}
+                    delete folder.__folders[k];
+                });
+        }
+
+        // ── Add orbifold-name text controller (guard against duplicates).
+        //    We keep track of our controller so gpname is always fresh.
+        if (this._nameCtrl) {
+            // Remove the previous controller row if possible.
+            try {
+                const idx = folder.__controllers?.indexOf(this._nameCtrl);
+                if (idx >= 0) folder.__controllers.splice(idx, 1);
+                this._nameCtrl.domElement?.closest('li')?.remove();
+            } catch (_) {}
+        }
+        this._nameCtrl = folder
+            .add(this._wg.guiParams, 'name')
+            .name('orbifold symbol')
+            .onChange(() => {
+                this._wg.groupNameChanged(); // rebuilds sliders + geometry
+                if (this._onChanged) this._onChanged();
+            });
+        this._wg.paramGui.gpname = this._nameCtrl;
+
+        // ── "show edges" checkbox for the on-image parameter editor.
+        if (this._showEdgesCtrl) {
+            try {
+                const idx = folder.__controllers?.indexOf(this._showEdgesCtrl);
+                if (idx >= 0) folder.__controllers.splice(idx, 1);
+                this._showEdgesCtrl.domElement?.closest('li')?.remove();
+            } catch (_) {}
+        }
+        this._showEdgesCtrl = folder
+            .add(this._uiConfig, 'showDomain')
+            .name('show edges')
+            .onChange(() => {
+                if (this._onChanged) this._onChanged();
+            });
+
+        // ── "fill domain" checkbox for the on-image parameter editor.
+        if (this._showFillCtrl) {
+            try {
+                const idx = folder.__controllers?.indexOf(this._showFillCtrl);
+                if (idx >= 0) folder.__controllers.splice(idx, 1);
+                this._showFillCtrl.domElement?.closest('li')?.remove();
+            } catch (_) {}
+        }
+        this._showFillCtrl = folder
+            .add(this._uiConfig, 'showFill')
+            .name('fill domain')
+            .onChange(() => {
+                if (this._onChanged) this._onChanged();
+            });
+
+        // ── Populate sub-folder with length/twist sliders.
+        this._wg.updateTheGroup();
+
+        if (DEBUG) console.log(`${MYNAME}.createUI() done`);
+    }
+
+    /**
+     * Returns a Group for the current orbifold.
+     *
+     * Each face of the FD comes in as an array of sPlanes: [0] is the wall,
+     * any further entries are bounds marking where along that wall this face
+     * runs.  Both are handed to the Group: the flat list of walls is what gets
+     * drawn and packed, the full faces are what the fundamental-domain
+     * reduction needs.  For an orbifold with a handle or a second crosscap
+     * (oo, 2xo, 33333, ...) two or three faces share one wall sPlane and are
+     * told apart only by their bounds, each with its own pairing transform, so
+     * dropping the bounds makes the first of them swallow the rest and the
+     * pattern is folded by the wrong generator across their shared wall.
+     */
+    getGroup() {
+        const fd = this._wg.FD;
+        if (!fd) return null;
+        const flatS = fd.s.map(face => face[0]);
+        return new Group({ s: flatS, t: fd.t, walls: fd.s });
+    }
+
+    // ── Serialization (used by ParamObj.getValue / .setValue) ────────────
+
+    getParamsMap() {
+        return this._wg.getParamsMap();
+    }
+
+    setParamsMap(paramsMap) {
+        // WallPaperGroup_General.setParamsMap updates guiParams, calls
+        // gpname.setValue, rebuildGui() and updateTheGroup() automatically.
+        this._wg.setParamsMap(paramsMap);
+    }
+
+    getCopy() {
+        const copy = new Group_Orbifold({ orbifold: this._wg.guiParams.name });
+        // Copy current length/twist values into the copy's guiParams.
+        Object.assign(copy._wg.guiParams, this._wg.getParamsMap());
+        copy._compute();
+        return copy;
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────
+
+    _compute() {
+        const ok = this._wg.updateTheGroup();
+        if (ok) this._wg.updateTheGroupGeometry();
+        else if (DEBUG) console.warn(`${MYNAME}._compute() failed:`, this._wg.errorLog);
+    }
+
+} // class Group_Orbifold
