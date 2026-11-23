@@ -2,8 +2,11 @@
 // WallPaperGroup_General creates. Values live in a plain object (the engine's
 // guiParams), so the engine reads them exactly as before.
 
-import { LENGTHMINVALUE, LENGTHMAXVALUE, TWISTMINVALUE, TWISTMAXVALUE }
+import { LENGTHMINVALUE, LENGTHMAXVALUE }
   from '../vendor/symmhub/lib/orbilib/WallPaperGroup_General.js';
+
+// Orbiscope's own twist range (the engine's is ±0.5).
+export const TWISTMINVALUE = -1, TWISTMAXVALUE = 1;
 
 export const RANGES = {
   l: [LENGTHMINVALUE, LENGTHMAXVALUE],
@@ -56,7 +59,8 @@ export class ParamStore {
 export function makeHeadlessFolder(store, onAny) {
   const folder = {
     add(obj, key, min, max) {
-      if (key !== 'name') store.define(key, (min !== undefined && max !== undefined) ? [min, max] : undefined);
+      if (key !== 'name') store.define(key, key.endsWith('_t') ? RANGES.t
+        : (min !== undefined && max !== undefined) ? [min, max] : undefined);
       const ctrl = {
         _cb: null,
         setValue(v) { obj[key] = v; if (ctrl._cb) ctrl._cb(v); return ctrl; },
