@@ -1,1 +1,1 @@
-{"name": "Orbiscope", "cat": "Geometry", "icon": "star", "desc": "Edit an orbifold signature and reshape its pattern by dragging its features.", "path": "orbiscope/", "live": true, "img": "icons/orbiscope.jpg"}
+{"name": "Orbiscope", "cat": "Geometry", "icon": "star", "desc": "Edit an orbifold signature and reshape its pattern by dragging its features.", "path": "orbiscope/", "live": false, "img": "icons/orbiscope.jpg"}
